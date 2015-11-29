@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-from optparse import OptionParser
 import asyncio
 import os
 import re
-import pypipdfocr
+import subprocess
+from optparse import OptionParser
 
 
 def run_analyser(options,args):
@@ -11,34 +11,98 @@ def run_analyser(options,args):
         if not os.path.isabs(args[0]):
             print("Must use absolute paths")
         else:
-            contents = get_payslips(args[0])
+            contents = get_payslips(args[0], 'pdf')
             print(contents)
-            asynchronously_get_deets(contents)
+            asynchronously_convert_pdfs(contents, './images')
 
     else:
         print(parser.print_help())
 
 
+#######
+def get_payslips(directory, suffix, keep_dir=False):
+    """
 
-def get_payslips(directory):
+    :rtype: List[str]
+    """
     print("Directory to be scanned is: {}".format(directory))
-    contents = [x for x in os.listdir(directory) if not re.search("P60", x)]
+
+    if keep_dir:
+        contents = ["{}/{}".format(directory, x) for x in os.listdir(directory) if
+                    re.search(suffix, x) and not re.search("P60", x)]
+    else:
+        contents = [x for x in os.listdir(directory) if re.search(suffix, x) and not re.search("P60", x)]
     return contents
 
-async def process_pdfs(pdf_list):
-    await asyncio.wait([process_pdf(index,pdf)for index, pdf in enumerate(pdf_list)])
 
-async def process_pdf(index, pdf):
-    await asyncio.sleep(index % 5)
-    print(index)
-    return pdf
+#######
 
-def asynchronously_get_deets(pdf_list):
+####### Process PDFS
+async def process_pdfs(pdf_list, destination_directory: str):
+    res, _ = await asyncio.wait([process_pdf(pdf, destination_directory) for pdf in pdf_list])
+    sorted_result = sorted(task.result() for task in res)
+    while len(sorted_result) != len(get_payslips(destination_directory, 'jpg')):
+        await asyncio.sleep(1)
+    return sorted_result
+
+
+#######
+
+####### Process PDF
+async def process_pdf(pdf: str, destination_directory: str):
+    # Converting first page into JPG
+    jpg = destination_directory + "/" + pdf.split('/')[-1][:-3] + 'jpg'
+    await asyncio.create_subprocess_shell("convert -quality 100% {} {}".format(pdf + "[0]", jpg))
+    # print("Converted", "{0} converted".format(pdf))
+    return jpg
+
+
+######
+
+###### Convert PDFs
+
+def asynchronously_convert_pdfs(pdf_list, destination_directory):
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(process_pdfs(pdf_list))
+    return_val = loop.run_until_complete(process_pdfs(pdf_list, destination_directory))
+    return return_val
 
-def synchronously_get_deets(pdf_list):
-    pass
+
+######
+
+####### Process PDFS
+async def tesseract_images(image_list):
+    res, _ = await asyncio.wait([tesseract_image(image) for image in image_list])
+    dict_result = {task.result() for task in res}
+    print(dict_result)
+    return dict_result
+
+
+#######
+
+####### Process PDF
+async def tesseract_image(image: str):
+    # Converting first page into JPG
+    text = await asyncio.create_subprocess_shell("tesseract {} stdout".format(image), stdout=subprocess.PIPE)
+    print(text)
+    return {image: text}
+
+
+######
+
+###### Get strings from images
+def asynchronously_tesseract_images(image_list):
+    loop = asyncio.get_event_loop()
+    return_val = loop.run_until_complete(tesseract_images(image_list))
+    loop.close()
+    return return_val
+
+
+######
+
+
+
+
+
 
 if __name__ == '__main__':
     parser = OptionParser()
@@ -53,13 +117,3 @@ if __name__ == '__main__':
 
     (options, args) = parser.parse_args()
     run_analyser(options,args)
-
-
-#
-#
-# loop.close()
-
-# async def process_pdfs(pdf_list):
-#
-#     async def process_pdf(pdf):
-#         await return pdf
